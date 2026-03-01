@@ -1,0 +1,13 @@
+[Unit]
+Description=Dual Agents Service
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/dual-agents
+ExecStart=/usr/bin/npm run start
+Restart=always
+User=ubuntu
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
