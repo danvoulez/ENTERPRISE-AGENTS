@@ -18,7 +18,14 @@ import { intakeStage } from './execution/stages/intake.js';
 import { healthRouter } from './api/health.js';
 import { dashboardRouter } from './api/dashboard.js';
 import { createLogger } from './observability/logger.js';
+import { FileWriterAdapter } from './adapters/file-writer.js';
+import { SupabaseRealtimeAdapter } from './adapters/supabase-realtime.js';
+import { WebhookAdapter } from './adapters/webhook.js';
+import { EmailAdapter } from './adapters/email.js';
+import { ExecutionLogger } from './persistence/execution-logger.js';
+import { ConversationHandler } from './control/conversation-handler.js';
 
+const bootstrap = async (): Promise<void> => {
 const config = loadConfig();
 const logger = createLogger(config.observability.logLevel);
 
@@ -34,10 +41,50 @@ const fsm = new StateMachine();
 
 const anthropic = new AnthropicAdapter(config.anthropic.apiKey, config.anthropic.model);
 const ollama = new OllamaAdapter(config.ollama.baseUrl, config.ollama.model);
-const git = new GitAdapter(config.repo.root);
-const pipeline = new Pipeline(jobs, checkpoints, audit, evidence, metrics, fsm, anthropic, ollama, git);
-const queue = new WorkQueue(jobs);
+const executionLogger = new ExecutionLogger(db);
+const fileWriter = new FileWriterAdapter(config.repo.root);
+const git = new GitAdapter(config.repo.root, config.github.remote, config.github.branch, config.github.token);
 const linear = new LinearAdapter(config.linear.teamKey, config.linear.project);
+const supabase = new SupabaseRealtimeAdapter(config.supabase.url, config.supabase.anonKey, config.supabase.channel);
+const email = new EmailAdapter(config.email.apiUrl, config.email.apiKey, config.email.to);
+const webhookAdapter = new WebhookAdapter(config.webhook.secret, executionLogger);
+const conversationHandler = new ConversationHandler(anthropic, supabase, email, executionLogger, jobs);
+
+await supabase.connect();
+supabase.onMessage(async (msg) => {
+  await conversationHandler.handleInbound({
+    source: 'supabase',
+    type: msg.type,
+    content: msg.content,
+    jobId: msg.jobId
+  });
+});
+
+webhookAdapter.on('alert', async (payload) => {
+  await conversationHandler.handleInbound({
+    source: 'webhook',
+    type: 'alert',
+    content: payload.message,
+    jobId: payload.jobId
+  });
+});
+
+const pipeline = new Pipeline(
+  jobs,
+  checkpoints,
+  audit,
+  evidence,
+  metrics,
+  fsm,
+  anthropic,
+  ollama,
+  git,
+  fileWriter,
+  executionLogger,
+  conversationHandler,
+  linear
+);
+const queue = new WorkQueue(jobs);
 
 const scheduler = new Scheduler(queue, config.runtime.pollInterval, async () => intakeStage(linear));
 scheduler.start();
@@ -66,3 +113,14 @@ dashboardApp.use('/', dashboardRouter());
 dashboardApp.listen(config.observability.dashboardPort, () => {
   logger.info(`dashboard listening on ${config.observability.dashboardPort}`);
 });
+
+const webhookApp = express();
+webhookApp.use(express.json());
+webhookApp.use('/', webhookAdapter.getRouter());
+webhookApp.listen(config.webhook.port, () => {
+  logger.info(`webhook server listening on ${config.webhook.port}`);
+});
+
+};
+
+void bootstrap();

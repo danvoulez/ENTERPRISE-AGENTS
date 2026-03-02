@@ -10,7 +10,7 @@ export const openDatabase = (dbPath: string): Database.Database => {
 };
 
 export const runMigrations = (db: Database.Database): void => {
-  const migrations = ['migrations/001_initial.sql', 'migrations/002_audit.sql'];
+  const migrations = ['migrations/001_initial.sql', 'migrations/002_audit.sql', 'migrations/003_execution_log.sql'];
   for (const file of migrations) {
     db.exec(fs.readFileSync(file, 'utf-8'));
   }

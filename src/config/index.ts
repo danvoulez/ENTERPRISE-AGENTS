@@ -23,6 +23,25 @@ export const loadConfig = (): DualAgentsConfig => {
       ciCommand: process.env.REPO_CI_COMMAND,
       branch: process.env.REPO_BRANCH
     },
+    github: {
+      token: secret(process.env.GITHUB_TOKEN, 'ghp_placeholder'),
+      remote: process.env.GITHUB_REMOTE,
+      branch: process.env.GITHUB_BRANCH
+    },
+    supabase: {
+      url: process.env.SUPABASE_URL,
+      anonKey: secret(process.env.SUPABASE_ANON_KEY, 'supabase-anon-placeholder'),
+      channel: process.env.SUPABASE_CHANNEL
+    },
+    webhook: {
+      port: Number(process.env.WEBHOOK_PORT ?? 9090),
+      secret: secret(process.env.WEBHOOK_SECRET, 'webhook-secret-placeholder')
+    },
+    email: {
+      apiUrl: process.env.EMAIL_API_URL,
+      apiKey: secret(process.env.EMAIL_API_KEY, 'email-key-placeholder'),
+      to: process.env.EMAIL_TO
+    },
     runtime: {
       pollInterval: Number(process.env.RUNTIME_POLL_INTERVAL ?? 60000),
       maxConcurrent: Number(process.env.RUNTIME_MAX_CONCURRENT ?? 1),
