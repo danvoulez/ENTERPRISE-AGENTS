@@ -1,20 +1,39 @@
-# Dual-Agents v1.0
+# Dual-Agents v1.1 (Rust-only)
 
-Production-grade autonomous system now running fully in **Rust** with:
+Sistema fortalecido para produção e **100% em Rust**.
 
-- Control plane (scheduler, state machine, SQLite queue/checkpoints)
-- Execution plane (plan → code → review → validate → commit)
-- Integration adapters (Anthropic, Ollama, Linear, Git)
-- Observability/API (Axum health/jobs endpoints + tracing logs)
-- Persistence (SQLite state + execution logs + evidence store)
+## O que está em produção
 
-## Quick start
+- Control plane com scheduler e máquina de estados
+- Pipeline completo: plan → code → review → validate → commit
+- API operacional com endpoints de health e listagem de jobs
+- Persistência em SQLite (jobs, checkpoints e execution log)
+- Evidências gravadas em filesystem
+- Execução e deploy sem Node.js/TypeScript legado
+
+## Executar localmente
 
 ```bash
 cargo run
 ```
 
-Endpoints:
+## Endpoints
 
-- Health: `http://localhost:4001/health`
-- Jobs: `http://localhost:4001/jobs`
+- `GET /health` → `http://localhost:4001/health`
+- `GET /jobs` → `http://localhost:4001/jobs`
+
+## Configuração por ambiente
+
+- `DB_PATH` (default: `dual_agents.db`)
+- `EVIDENCE_PATH` (default: `evidence`)
+- `REPO_ROOT` (default: `.`)
+- `GIT_BRANCH` (default: `main`)
+- `ANTHROPIC_MODEL` (default: `claude-3-5-sonnet`)
+- `OLLAMA_MODEL` (default: `codellama`)
+- `HEALTH_PORT` (default: `4001`)
+- `POLL_INTERVAL_MS` (default: `1000`)
+
+## Deploy
+
+- Docker multi-stage build em `docker/Dockerfile`
+- Service unit Rust em `systemd/dual-agents.service`
