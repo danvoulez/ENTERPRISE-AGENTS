@@ -176,6 +176,15 @@ impl CheckpointStore {
     pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
         Self { conn }
     }
+    pub fn get_latest(&self, job_id: &str, stage: &str) -> Option<String> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.query_row(
+            "SELECT data FROM checkpoints WHERE job_id=? AND stage=? ORDER BY created_at DESC LIMIT 1",
+            params![job_id, stage],
+            |row| row.get(0),
+        )
+        .ok()
+    }
 
     pub fn save(&self, job_id: &str, stage: &str, data: &str) {
         let _ = self.conn.lock().expect("db lock").execute(

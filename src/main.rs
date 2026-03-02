@@ -41,10 +41,19 @@ async fn main() -> Result<()> {
         evidence,
         execution_logger,
         StateMachine::default(),
-        AnthropicAdapter::new(config.anthropic_model.clone()),
-        OllamaAdapter::new(config.ollama_model.clone()),
-        GitAdapter::new(config.repo_root.clone(), config.git_branch.clone()),
-        LinearAdapter,
+        AnthropicAdapter::new(
+            config.anthropic_model.clone(),
+            config.anthropic_api_key.clone(),
+        ),
+        OllamaAdapter::new(config.ollama_model.clone(), config.ollama_base_url.clone()),
+        GitAdapter::new(
+            config.repo_root.clone(),
+            config.git_branch.clone(),
+            config.git_remote.clone(),
+        ),
+        LinearAdapter::new(config.linear_api_key.clone(), config.linear_team_id.clone()),
+        config.max_review_iterations,
+        config.linear_done_state_type.clone(),
     ));
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
