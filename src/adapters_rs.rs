@@ -1,9 +1,8 @@
-use std::process::Command;
-
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::Client;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
+use tokio::process::Command;
 
 #[derive(Clone)]
 pub struct AnthropicAdapter {
@@ -159,7 +158,7 @@ impl GitAdapter {
     }
 
     pub fn changed_files(&self) -> Result<Vec<String>> {
-        let output = self.git(["status", "--porcelain"])?;
+        let output = self.git_blocking(["status", "--porcelain"])?;
         Ok(output
             .lines()
             .filter_map(|line| line.get(3..).map(ToString::to_string))
@@ -177,22 +176,62 @@ impl GitAdapter {
             bail!("nenhum arquivo alterado para commit");
         }
 
-        self.git(["checkout", &self.branch])?;
-        self.git(["add", "--"])?;
+        self.git_async(["add", "--"]).await?;
 
         let message = format!("{title}\n\njob: {job_id}\n\n{summary}");
-        self.git(["commit", "-m", &message])?;
-        self.git(["push", &self.remote, &self.branch])?;
+        self.git_async(["commit", "-m", &message]).await?;
 
-        let sha = self.git(["rev-parse", "HEAD"])?;
+        let sha = self.git_async(["rev-parse", "HEAD"]).await?;
+        let branch = self
+            .git_async(["rev-parse", "--abbrev-ref", "HEAD"])
+            .await?;
         Ok(CommitOutput {
             sha: sha.trim().to_string(),
-            branch: self.branch.clone(),
+            branch: branch.trim().to_string(),
         })
     }
 
-    fn git<const N: usize>(&self, args: [&str; N]) -> Result<String> {
+    pub async fn checkout_new_branch(&self, branch: &str) -> Result<()> {
+        self.git_async(["checkout", &self.branch]).await?;
+        self.git_async(["checkout", "-B", branch]).await?;
+        Ok(())
+    }
+
+    pub async fn stash_if_needed(&self) -> Result<()> {
+        let status = self.git_async(["status", "--porcelain"]).await?;
+        if !status.trim().is_empty() {
+            let _ = self
+                .git_async(["stash", "push", "-u", "-m", "code247-auto-stash"])
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn push_branch(&self, branch: &str) -> Result<()> {
+        self.git_async(["push", &self.remote, branch]).await?;
+        Ok(())
+    }
+
+    pub async fn git_async<const N: usize>(&self, args: [&str; N]) -> Result<String> {
         let out = Command::new("git")
+            .current_dir(&self.repo_root)
+            .args(args)
+            .output()
+            .await
+            .with_context(|| format!("falha executando git {:?}", args))?;
+
+        if !out.status.success() {
+            return Err(anyhow!(
+                "git {:?} falhou: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    }
+
+    fn git_blocking<const N: usize>(&self, args: [&str; N]) -> Result<String> {
+        let out = std::process::Command::new("git")
             .current_dir(&self.repo_root)
             .args(args)
             .output()

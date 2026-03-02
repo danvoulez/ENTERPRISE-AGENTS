@@ -19,6 +19,10 @@ pub struct Config {
     pub health_port: u16,
     pub poll_interval_ms: u64,
     pub max_review_iterations: u8,
+    pub max_concurrent_jobs: usize,
+    pub voulezvous_spec_path: String,
+    pub github_token: Option<String>,
+    pub github_repo: Option<String>,
 }
 
 impl Config {
@@ -43,6 +47,11 @@ impl Config {
             health_port: parse_env("HEALTH_PORT", 4001u16)?,
             poll_interval_ms: parse_env("POLL_INTERVAL_MS", 1000u64)?,
             max_review_iterations: parse_env("MAX_REVIEW_ITERATIONS", 2u8)?,
+            max_concurrent_jobs: parse_env("MAX_CONCURRENT_JOBS", 3usize)?,
+            voulezvous_spec_path: env::var("VOULEZVOUS_SPEC_PATH")
+                .unwrap_or_else(|_| "../voulezvous/docs/PLATAFORMA_SPEC.md".to_string()),
+            github_token: env::var("GITHUB_TOKEN").ok(),
+            github_repo: env::var("GITHUB_REPO").ok(),
         })
     }
 }
