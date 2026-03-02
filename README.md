@@ -1,24 +1,20 @@
 # Dual-Agents v1.0
 
-Production-grade autonomous system with:
+Production-grade autonomous system now running fully in **Rust** with:
 
 - Control plane (scheduler, state machine, SQLite queue/checkpoints)
-- Execution plane (intake → plan → code → validate → review → commit)
+- Execution plane (plan → code → review → validate → commit)
 - Integration adapters (Anthropic, Ollama, Linear, Git)
-- Observability (structured logs, Prometheus metrics, SSE dashboard)
-- Persistence (SQLite state + append-only audit + evidence store)
+- Observability/API (Axum health/jobs endpoints + tracing logs)
+- Persistence (SQLite state + execution logs + evidence store)
 
 ## Quick start
 
 ```bash
-cp .env.example .env
-npm install
-npm run build
-npm run start
+cargo run
 ```
 
 Endpoints:
 
-- Dashboard: `http://localhost:4000`
 - Health: `http://localhost:4001/health`
-- Metrics: `http://localhost:4001/metrics`
+- Jobs: `http://localhost:4001/jobs`
