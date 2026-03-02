@@ -111,7 +111,11 @@ impl OllamaAdapter {
     pub async fn code(&self, plan: &str) -> Result<String> {
         let req = json!({
             "model": self.model,
-            "prompt": format!("Implemente o plano abaixo em código real, sem stubs:\n{plan}"),
+            "prompt": format!(
+                "Implemente o plano abaixo em código real, sem stubs. \
+        Retorne SOMENTE blocos de arquivo neste formato exato, sem texto fora dos blocos:\n\
+        <file path=\"src/components/UserCard.tsx\">\n... código ...\n</file>\n\nPlano:\n{plan}"
+            ),
             "stream": false
         });
 
@@ -157,8 +161,8 @@ impl GitAdapter {
         }
     }
 
-    pub fn changed_files(&self) -> Result<Vec<String>> {
-        let output = self.git_blocking(["status", "--porcelain"])?;
+    pub async fn changed_files(&self) -> Result<Vec<String>> {
+        let output = self.git_async(["status", "--porcelain"]).await?;
         Ok(output
             .lines()
             .filter_map(|line| line.get(3..).map(ToString::to_string))
@@ -176,7 +180,9 @@ impl GitAdapter {
             bail!("nenhum arquivo alterado para commit");
         }
 
-        self.git_async(["add", "--"]).await?;
+        for file in files {
+            self.git_async(["add", "--", file]).await?;
+        }
 
         let message = format!("{title}\n\njob: {job_id}\n\n{summary}");
         self.git_async(["commit", "-m", &message]).await?;
@@ -229,23 +235,6 @@ impl GitAdapter {
         }
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
     }
-
-    fn git_blocking<const N: usize>(&self, args: [&str; N]) -> Result<String> {
-        let out = std::process::Command::new("git")
-            .current_dir(&self.repo_root)
-            .args(args)
-            .output()
-            .with_context(|| format!("falha executando git {:?}", args))?;
-
-        if !out.status.success() {
-            return Err(anyhow!(
-                "git {:?} falhou: {}",
-                args,
-                String::from_utf8_lossy(&out.stderr)
-            ));
-        }
-        Ok(String::from_utf8_lossy(&out.stdout).to_string())
-    }
 }
 
 #[derive(Clone)]
@@ -266,7 +255,7 @@ impl LinearAdapter {
 
     pub async fn get_issue(&self, issue_id: &str) -> Result<LinearIssue> {
         self.graphql(
-            r#"query($id:String!){issue(id:$id){id identifier title state{id name type}}}"#,
+            r#"query($id:String!){issue(id:$id){id identifier title description state{id name type}}}"#,
             json!({"id": issue_id}),
         )
         .await
@@ -416,6 +405,7 @@ pub struct LinearIssue {
     pub id: String,
     pub identifier: String,
     pub title: String,
+    pub description: Option<String>,
     pub state: LinearState,
 }
 

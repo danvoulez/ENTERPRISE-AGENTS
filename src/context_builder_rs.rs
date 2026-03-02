@@ -29,11 +29,17 @@ impl ContextBuilder {
 
     fn compose(&self, issue: &LinearIssue, fallback_payload: &str) -> String {
         let spec = fs::read_to_string(&self.spec_path).unwrap_or_else(|_| canonical_spec_stub());
+        let description = issue
+            .description
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or("(sem description na issue)");
         format!(
-            "Issue: {} - {}\nEstado: {}\nPayload original: {}\n\n{}\n\nInstrução: gere um plano técnico executável e objetivo.",
+            "Issue: {} - {}\nEstado: {}\nDescription: {}\nPayload original: {}\n\n{}\n\nInstrução: gere um plano técnico executável e objetivo.",
             issue.identifier,
             issue.title,
             issue.state.name,
+            description,
             fallback_payload,
             spec,
         )

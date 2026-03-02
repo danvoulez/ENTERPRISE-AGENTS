@@ -167,7 +167,7 @@ impl Pipeline {
             bail!("validação falhou: {}", validation.errors.join("; "));
         }
 
-        let files = self.git.changed_files()?;
+        let files = self.git.changed_files().await?;
 
         self.transition(&mut job, JobStatus::Committing)?;
         let commit = self
