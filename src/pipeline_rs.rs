@@ -23,6 +23,8 @@ pub struct Pipeline {
     ollama: OllamaAdapter,
     git: GitAdapter,
     linear: LinearAdapter,
+    max_review_iterations: u8,
+    linear_done_state_type: String,
 }
 
 impl Pipeline {
@@ -37,6 +39,8 @@ impl Pipeline {
         ollama: OllamaAdapter,
         git: GitAdapter,
         linear: LinearAdapter,
+        max_review_iterations: u8,
+        linear_done_state_type: String,
     ) -> Self {
         Self {
             jobs,
@@ -48,39 +52,84 @@ impl Pipeline {
             ollama,
             git,
             linear,
+            max_review_iterations,
+            linear_done_state_type,
         }
     }
 
     pub async fn run(&self, mut job: Job) -> Result<()> {
+        let issue = self.linear.get_issue(&job.issue_id).await?;
+        let backlog = self.linear.list_team_issues(None).await?;
+        let tracked = backlog.iter().any(|i| i.id == issue.id);
+        if !tracked {
+            return Err(anyhow!(
+                "issue {} não pertence ao backlog do time configurado",
+                issue.id
+            ));
+        }
+        if issue.state.r#type.eq_ignore_ascii_case("completed") {
+            self.transition(&mut job, JobStatus::Done)?;
+            return Ok(());
+        }
+
         self.transition(&mut job, JobStatus::Planning)?;
-        let plan = self
-            .measure_and_log(&job.id, "plan", "anthropic", || {
-                self.anthropic.plan(&job.payload)
-            })
-            .await?;
-        self.checkpoints
-            .lock()
-            .expect("checkpoint lock")
-            .save(&job.id, "PLANNING", &plan);
+        let plan = if let Some(saved) = self.checkpoint("PLANNING", &job.id) {
+            saved
+        } else {
+            let generated = self
+                .measure_and_log(&job.id, "plan", "anthropic", || {
+                    self.anthropic.plan(&job.payload)
+                })
+                .await?;
+            self.checkpoints
+                .lock()
+                .expect("checkpoint lock")
+                .save(&job.id, "PLANNING", &generated);
+            generated
+        };
 
         self.transition(&mut job, JobStatus::Coding)?;
-        let code = self
-            .measure_and_log(&job.id, "code", "ollama", || self.ollama.code(&plan))
-            .await?;
+        let mut code = if let Some(saved) = self.checkpoint("CODING", &job.id) {
+            saved
+        } else {
+            let generated = self
+                .measure_and_log(&job.id, "code", "ollama", || self.ollama.code(&plan))
+                .await?;
+            self.checkpoints
+                .lock()
+                .expect("checkpoint lock")
+                .save(&job.id, "CODING", &generated);
+            generated
+        };
         self.evidence.write(&job.id, "code", &code)?;
 
         self.transition(&mut job, JobStatus::Reviewing)?;
-        let review = self
+        let mut review = self
             .measure_and_log(&job.id, "review", "anthropic", || {
                 self.anthropic.review(&code)
             })
             .await?;
+
+        let mut iteration = 0;
+        while !review.issues.is_empty() && iteration < self.max_review_iterations {
+            code = self
+                .measure_and_log(&job.id, "recoding", "ollama", || {
+                    self.ollama.code(&review.code)
+                })
+                .await?;
+            review = self
+                .measure_and_log(&job.id, "rereview", "anthropic", || {
+                    self.anthropic.review(&code)
+                })
+                .await?;
+            iteration += 1;
+        }
+
         self.evidence
             .write(&job.id, "review", &serde_json::to_string_pretty(&review)?)?;
 
         self.transition(&mut job, JobStatus::Validating)?;
-        // Validation/apply stage placeholder.
-        let files = vec!["generated.patch".to_string()];
+        let files = self.git.changed_files()?;
 
         self.transition(&mut job, JobStatus::Committing)?;
         let commit = self
@@ -99,14 +148,28 @@ impl Pipeline {
                 0,
             );
 
+        let done_state_id = self
+            .linear
+            .find_state_id_by_type(&self.linear_done_state_type)
+            .await?;
         self.transition(&mut job, JobStatus::Done)?;
         self.linear
-            .update_issue_state(&job.issue_id, "Done")
+            .bulk_update_issue_state(&[job.issue_id.clone()], &done_state_id)
             .await?;
         Ok(())
     }
 
+    fn checkpoint(&self, stage: &str, job_id: &str) -> Option<String> {
+        self.checkpoints
+            .lock()
+            .expect("checkpoint lock")
+            .get_latest(job_id, stage)
+    }
+
     fn transition(&self, job: &mut Job, to: JobStatus) -> Result<()> {
+        if job.status == to {
+            return Ok(());
+        }
         if !self.fsm.can_transition(job.status, to) {
             return Err(anyhow!("Invalid transition {:?} -> {:?}", job.status, to));
         }
