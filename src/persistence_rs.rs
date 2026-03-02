@@ -8,6 +8,7 @@ use anyhow::Result;
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum JobStatus {
@@ -141,6 +142,31 @@ impl JobsRepository {
             "UPDATE jobs SET status=?, last_error=?, updated_at=? WHERE id=?",
             params![status.as_str(), error, Utc::now().to_rfc3339(), id],
         );
+    }
+
+    pub fn create_job(&mut self, issue_id: &str, payload: &str) -> Result<Job> {
+        let job = Job {
+            id: Uuid::new_v4().to_string(),
+            issue_id: issue_id.to_string(),
+            status: JobStatus::Pending,
+            payload: payload.to_string(),
+            retries: 0,
+        };
+
+        self.conn.lock().expect("db lock").execute(
+            "INSERT INTO jobs (id, issue_id, status, payload, retries, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![
+                job.id,
+                job.issue_id,
+                job.status.as_str(),
+                job.payload,
+                job.retries,
+                Utc::now().to_rfc3339(),
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+
+        Ok(job)
     }
 
     pub fn increment_retries(&mut self, id: &str) {
