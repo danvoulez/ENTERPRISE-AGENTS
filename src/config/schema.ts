@@ -31,6 +31,25 @@ export const configSchema = z.object({
     ciCommand: z.string().default('npm run ci:phase0'),
     branch: z.string().default('main')
   }),
+  github: z.object({
+    token: z.string(),
+    remote: z.string().default('origin'),
+    branch: z.string().default('main')
+  }),
+  supabase: z.object({
+    url: z.string().url(),
+    anonKey: z.string(),
+    channel: z.string()
+  }),
+  webhook: z.object({
+    port: z.number().default(9090),
+    secret: z.string()
+  }),
+  email: z.object({
+    apiUrl: z.string().url(),
+    apiKey: z.string(),
+    to: z.string().email()
+  }),
   runtime: z.object({
     pollInterval: z.number().default(60_000),
     maxConcurrent: z.number().default(1),
