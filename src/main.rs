@@ -11,7 +11,7 @@ use std::{
 };
 
 use anyhow::Result;
-use tokio::time;
+use tokio::{signal, task::JoinHandle, time};
 use tracing::{error, info};
 
 use adapters_rs::{AnthropicAdapter, GitAdapter, LinearAdapter, OllamaAdapter};
@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let config = Config::from_env();
+    let config = Config::from_env()?;
     let db = SqliteDb::open(&config.db_path)?;
     db.run_migrations()?;
 
@@ -47,29 +47,53 @@ async fn main() -> Result<()> {
         LinearAdapter,
     ));
 
-    let poll_jobs = jobs.clone();
-    let poll_pipeline = pipeline.clone();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let worker = spawn_worker(jobs.clone(), pipeline, config.poll_interval_ms, shutdown_rx);
+    let api = tokio::spawn(api_rs::serve(config.clone(), jobs));
+
+    signal::ctrl_c().await?;
+    info!("shutdown signal received");
+    let _ = shutdown_tx.send(true);
+
+    worker.await??;
+    api.abort();
+    Ok(())
+}
+
+fn spawn_worker(
+    jobs: Arc<Mutex<JobsRepository>>,
+    pipeline: Arc<Pipeline>,
+    poll_interval_ms: u64,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) -> JoinHandle<Result<()>> {
     tokio::spawn(async move {
-        let mut ticker = time::interval(Duration::from_secs(1));
+        let mut ticker = time::interval(Duration::from_millis(poll_interval_ms));
         loop {
-            ticker.tick().await;
-            let maybe_job = poll_jobs.lock().expect("lock jobs").next_pending();
-            if let Some(job) = maybe_job {
-                if let Err(err) = poll_pipeline.run(job.clone()).await {
-                    error!(job_id=%job.id, error=%err, "job failed");
-                    let mut repo = poll_jobs.lock().expect("lock jobs");
-                    repo.increment_retries(&job.id);
-                    repo.update_status(
-                        &job.id,
-                        persistence_rs::JobStatus::Failed,
-                        Some(err.to_string()),
-                    );
-                } else {
-                    info!(job_id=%job.id, "job completed");
+            tokio::select! {
+                _ = ticker.tick() => {
+                    let maybe_job = jobs.lock().expect("lock jobs").next_pending();
+                    if let Some(job) = maybe_job {
+                        if let Err(err) = pipeline.run(job.clone()).await {
+                            error!(job_id=%job.id, error=%err, "job failed");
+                            let mut repo = jobs.lock().expect("lock jobs");
+                            repo.increment_retries(&job.id);
+                            repo.update_status(
+                                &job.id,
+                                persistence_rs::JobStatus::Failed,
+                                Some(err.to_string()),
+                            );
+                        } else {
+                            info!(job_id=%job.id, "job completed");
+                        }
+                    }
+                }
+                changed = shutdown.changed() => {
+                    if changed.is_ok() && *shutdown.borrow() {
+                        info!("worker shutdown complete");
+                        return Ok(());
+                    }
                 }
             }
         }
-    });
-
-    api_rs::serve(config, jobs).await
+    })
 }

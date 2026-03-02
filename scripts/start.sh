@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
-npm install
-npm run build
-npm run start
+cargo build --release
+./target/release/dual-agents-rust
